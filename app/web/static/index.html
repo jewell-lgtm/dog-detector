@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dog Detector</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<h1>Dog Detector — Remote</h1>
+<div class="container">
+  <div class="video-wrap" id="video-wrap">
+    <img id="stream" src="/stream" alt="Video stream">
+    <canvas id="roi-canvas"></canvas>
+    <div class="drawing-hint" id="drawing-hint">Click to add points. Double-click to finish.</div>
+  </div>
+  <div class="sidebar">
+    <div class="card">
+      <h2>Status</h2>
+      <div class="stat"><span>Dog</span><span id="dog-state" class="val dog-out">--</span></div>
+      <div class="stat"><span>Enter count</span><span id="enter-count" class="val">0</span></div>
+      <div class="stat"><span>Leave count</span><span id="leave-count" class="val">0</span></div>
+    </div>
+    <div class="card">
+      <h2>Detection</h2>
+      <div class="stat"><span>Dogs detected</span><span id="dog-count" class="val">0</span></div>
+      <div class="stat"><span>Camera FPS</span><span id="cam-fps" class="val">--</span></div>
+      <div class="stat"><span>Inference FPS</span><span id="inf-fps" class="val">--</span></div>
+      <div class="stat"><span>Inference ms</span><span id="inf-ms" class="val">--</span></div>
+      <div class="stat"><span>Frames</span><span id="frame-count" class="val">0</span></div>
+    </div>
+    <div class="card">
+      <h2>ROI Controls</h2>
+      <div class="btn-row">
+        <button id="btn-draw-roi">Draw ROI</button>
+        <button id="btn-clear-roi">Clear ROI</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Triggers</h2>
+      <div class="btn-row">
+        <button id="btn-trigger-enter">Fire Enter Script</button>
+        <button id="btn-trigger-leave">Fire Leave Script</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Event Log</h2>
+      <div id="event-log"></div>
+    </div>
+  </div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+
+// Poll state
+async function pollState() {
+  try {
+    const r = await fetch('/api/state');
+    const s = await r.json();
+    if (s.tracker) {
+      const inside = s.tracker.dog_inside;
+      $('#dog-state').textContent = inside ? 'IN ROI' : 'OUT';
+      $('#dog-state').className = 'val ' + (inside ? 'dog-in' : 'dog-out');
+      $('#enter-count').textContent = s.tracker.enter_count || 0;
+      $('#leave-count').textContent = s.tracker.leave_count || 0;
+    }
+    $('#dog-count').textContent = (s.detections || []).length;
+    if (s.timings) {
+      $('#cam-fps').textContent = (s.timings.camera_fps || 0).toFixed(1);
+      $('#inf-fps').textContent = (s.timings.inference_fps || 0).toFixed(1);
+      $('#inf-ms').textContent = (s.timings.inference_ms || 0).toFixed(1);
+    }
+    $('#frame-count').textContent = s.frame_count || 0;
+    if (s.event_log) {
+      $('#event-log').textContent = s.event_log.slice(0, 30).join('\n');
+    }
+  } catch {}
+}
+setInterval(pollState, 1000);
+pollState();
+
+// ROI drawing
+let drawing = false;
+let roiPoints = [];
+const canvas = $('#roi-canvas');
+const ctx = canvas.getContext('2d');
+const hint = $('#drawing-hint');
+
+function resizeCanvas() {
+  const img = $('#stream');
+  canvas.width = img.clientWidth;
+  canvas.height = img.clientHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+$('#stream').addEventListener('load', resizeCanvas);
+setTimeout(resizeCanvas, 500);
+
+function drawROI() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (roiPoints.length === 0) return;
+  ctx.strokeStyle = '#0f0';
+  ctx.lineWidth = 2;
+  ctx.fillStyle = 'rgba(0,255,0,0.15)';
+  ctx.beginPath();
+  ctx.moveTo(roiPoints[0][0], roiPoints[0][1]);
+  for (let i = 1; i < roiPoints.length; i++) {
+    ctx.lineTo(roiPoints[i][0], roiPoints[i][1]);
+  }
+  if (!drawing) ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  for (const p of roiPoints) {
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#ff0';
+    ctx.fill();
+  }
+}
+
+$('#btn-draw-roi').addEventListener('click', () => {
+  drawing = true;
+  roiPoints = [];
+  hint.style.display = 'block';
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+});
+
+canvas.addEventListener('click', (e) => {
+  if (!drawing) return;
+  const rect = canvas.getBoundingClientRect();
+  roiPoints.push([e.clientX - rect.left, e.clientY - rect.top]);
+  drawROI();
+});
+
+canvas.addEventListener('dblclick', async (e) => {
+  if (!drawing || roiPoints.length < 3) return;
+  drawing = false;
+  hint.style.display = 'none';
+  drawROI();
+  // convert canvas coords to frame pixel coords
+  const img = $('#stream');
+  const natW = img.naturalWidth || 1280;
+  const natH = img.naturalHeight || 720;
+  const cW = canvas.width;
+  const cH = canvas.height;
+  const points = roiPoints.map(p => [
+    Math.round(p[0] * natW / cW),
+    Math.round(p[1] * natH / cH)
+  ]);
+  await fetch('/api/roi', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({points})
+  });
+  roiPoints = [];
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+});
+
+$('#btn-clear-roi').addEventListener('click', async () => {
+  roiPoints = [];
+  drawing = false;
+  hint.style.display = 'none';
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  await fetch('/api/roi/clear', {method: 'POST'});
+});
+
+$('#btn-trigger-enter').addEventListener('click', () => {
+  fetch('/api/trigger', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({event: 'enter'})
+  });
+});
+
+$('#btn-trigger-leave').addEventListener('click', () => {
+  fetch('/api/trigger', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({event: 'leave'})
+  });
+});
+</script>
+</body>
+</html>
