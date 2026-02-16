@@ -1,5 +1,5 @@
 import numpy as np
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, box
 
 
 class ROI:
@@ -35,6 +35,16 @@ class ROI:
         if not self.valid:
             return False
         return self._polygon.contains(Point(x, y))
+
+    def bbox_overlap(self, x1: int, y1: int, x2: int, y2: int) -> float:
+        """Fraction of bbox area that intersects the ROI (0.0–1.0)."""
+        if not self.valid:
+            return 0.0
+        bbox_poly = box(x1, y1, x2, y2)
+        bbox_area = bbox_poly.area
+        if bbox_area == 0:
+            return 0.0
+        return self._polygon.intersection(bbox_poly).area / bbox_area
 
     def polygon_array(self) -> np.ndarray | None:
         if not self.points:

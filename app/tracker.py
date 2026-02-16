@@ -17,8 +17,8 @@ def _test_roi():
 
 
 def _test_det(track_id=1, center=(50, 50)):
-    """Return a Detection inside the test ROI."""
-    return Detection(bbox=(0, 0, 1, 1), center=center, confidence=0.9, track_id=track_id)
+    """Return a Detection fully inside the test ROI."""
+    return Detection(bbox=(25, 25, 75, 75), center=center, confidence=0.9, track_id=track_id)
 
 
 @dataclass
@@ -41,10 +41,11 @@ class TrackerState:
 
 
 class Tracker:
-    def __init__(self, enter_frames: int = 3, leave_frames: int = 5):
+    def __init__(self, enter_frames: int = 3, leave_frames: int = 5, min_overlap: float = 0.5):
         self.state = TrackerState()
         self.enter_frames = enter_frames
         self.leave_frames = leave_frames
+        self.min_overlap = min_overlap
 
     def update(self, detections: list[Detection], roi: ROI) -> tuple[bool, bool]:
         """Returns (entered, left) booleans.
@@ -94,10 +95,10 @@ class Tracker:
         if not roi.valid:
             return False, False
 
-        # tag detections with in_roi, collect IDs seen in ROI this frame
+        # tag detections with in_roi via bbox overlap, collect IDs seen in ROI
         ids_in_roi: set[int] = set()
         for d in detections:
-            d.in_roi = roi.contains(*d.center)
+            d.in_roi = roi.bbox_overlap(*d.bbox) >= self.min_overlap
             if d.in_roi and d.track_id is not None:
                 ids_in_roi.add(d.track_id)
 

@@ -11,13 +11,14 @@ class Config:
     roi_points: list[list[int]] = field(default_factory=list)
     enter_script: str = ""
     leave_script: str = ""
-    camera_device: int = 0
+    camera_device: str | int = 0
     inference_interval: int = 5
     confidence: float = 0.4
     cooldown: float = 5.0
     web_port: int = 8000
     enter_frames: int = 3
     leave_frames: int = 5
+    min_overlap: float = 0.5
 
     def save(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
